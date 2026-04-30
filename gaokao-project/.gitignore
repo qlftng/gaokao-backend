@@ -1,9 +1,0 @@
-.env
-venv/
-__pycache__/
-frontend/
-backend/
-.ai_completion/
-*.log
-*.db
-*.exe
