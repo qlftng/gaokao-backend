@@ -39,6 +39,7 @@ SUBJECT_MAP = {
 class SubmitRequest(BaseModel):
     name: str
     wx_name: str = ""
+    phone: str = ""
     province: str = ""
     school_type: str = ""
     chinese: str = ""
@@ -64,9 +65,19 @@ async def submit(data: SubmitRequest):
         raise HTTPException(status_code=400, detail="姓名不能为空")
     if not data.province.strip():
         raise HTTPException(status_code=400, detail="省份不能为空")
+    if not data.phone.strip():
+        raise HTTPException(status_code=400, detail="手机号不能为空")
+
+    # 六选三校验：物理/化学/生物/政治/历史/地理中恰好选 3 门
+    elective_fields = [data.physics, data.chemistry, data.biology,
+                       data.politics, data.history, data.geography]
+    elective_count = sum(1 for v in elective_fields if v and v != "E")
+    if elective_count != 3:
+        raise HTTPException(status_code=400, detail="请选择恰好 3 门选考科目")
 
     name    = data.name.strip()
     wx_name = data.wx_name.strip() or name
+    phone   = data.phone.strip()
 
     # 计算选科组合（只存单字）
     elective_char = {
@@ -94,6 +105,7 @@ async def submit(data: SubmitRequest):
         # force=True：覆盖更新 students 表
         sb.table("students").update({
             "subjects":       subjects_str,
+            "phone":          phone,
             "push_count":     0,
             "last_push_date": None,
         }).eq("id", student_id).execute()
@@ -106,6 +118,7 @@ async def submit(data: SubmitRequest):
         student_res = sb.table("students").insert({
             "name":    name,
             "wx_name": wx_name,
+            "phone":   phone,
             "subjects": subjects_str,
         }).execute()
         student_id = student_res.data[0]["id"]
