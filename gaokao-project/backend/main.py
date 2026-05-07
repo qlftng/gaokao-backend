@@ -79,7 +79,10 @@ async def submit(data: SubmitRequest):
     )
 
     # 检查是否已存在
-    existing = sb.table("students").select("id").eq("name", name).eq("wx_name", wx_name).execute()
+    try:
+        existing = sb.table("students").select("id").eq("name", name).eq("wx_name", wx_name).execute()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查重查询失败: {str(e)}")
 
     if existing.data:
         student_id = existing.data[0]["id"]
