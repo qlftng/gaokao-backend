@@ -10,7 +10,6 @@ load_dotenv()
 app = FastAPI()
 
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[ALLOWED_ORIGINS],
@@ -23,9 +22,7 @@ sb = create_client(
     os.getenv("SUPABASE_SERVICE_KEY")
 )
 
-# 选项反转映射（用户选A=最差，存库时反转为D级）
 LEVEL_MAP = {"A": "D", "B": "C", "C": "B", "D": "A"}
-
 SUBJECT_MAP = {
     "chinese":   "语文",
     "math":      "数学",
@@ -37,6 +34,7 @@ SUBJECT_MAP = {
     "history":   "历史",
     "geography": "地理",
 }
+
 
 class SubmitRequest(BaseModel):
     name: str
@@ -56,6 +54,8 @@ class SubmitRequest(BaseModel):
     channels: str = ""
     invest: str = ""
     budget: str = ""
+    force: bool = False  # True = 覆盖更新已有数据
+
 
 @app.post("/api/submit")
 async def submit(data: SubmitRequest):
@@ -65,25 +65,49 @@ async def submit(data: SubmitRequest):
     if not data.province.strip():
         raise HTTPException(status_code=400, detail="省份不能为空")
 
-    # 计算选科组合
-    selected_subjects = []
-    for key, label in SUBJECT_MAP.items():
-        val = getattr(data, key)
-        if val and val != "E":
-            selected_subjects.append(label)
+    name    = data.name.strip()
+    wx_name = data.wx_name.strip() or name
 
-    subjects_str = "、".join(selected_subjects)
+    # 计算选科组合（只存单字）
+    elective_char = {
+        "physics": "物", "chemistry": "化", "biology": "生",
+        "politics": "政", "history": "历", "geography": "地",
+    }
+    subjects_str = "".join(
+        char for key, char in elective_char.items()
+        if getattr(data, key) not in ("", "E")
+    )
 
-    # 写入 students 表
-    student_res = sb.table("students").insert({
-        "name":        data.name.strip(),
-        "wx_name":     data.wx_name.strip() or data.name.strip(),
-        "subjects":    subjects_str,
-    }).execute()
+    # 检查是否已存在
+    existing = sb.table("students").select("id").eq("name", name).eq("wx_name", wx_name).execute()
 
-    student_id = student_res.data[0]["id"]
+    if existing.data:
+        student_id = existing.data[0]["id"]
 
-    # 写入 assessments 表（各科级别，反转后存入）
+        if not data.force:
+            # 已存在但没有 force，返回 409 让前端提示用户
+            raise HTTPException(status_code=409, detail="ALREADY_EXISTS")
+
+        # force=True：覆盖更新 students 表
+        sb.table("students").update({
+            "subjects":       subjects_str,
+            "push_count":     0,
+            "last_push_date": None,
+        }).eq("id", student_id).execute()
+
+        # 删除旧的 assessments，重新写入
+        sb.table("assessments").delete().eq("student_id", student_id).execute()
+
+    else:
+        # 全新写入
+        student_res = sb.table("students").insert({
+            "name":    name,
+            "wx_name": wx_name,
+            "subjects": subjects_str,
+        }).execute()
+        student_id = student_res.data[0]["id"]
+
+    # 写入 assessments
     assessments = []
     for key, label in SUBJECT_MAP.items():
         val = getattr(data, key)
@@ -93,12 +117,12 @@ async def submit(data: SubmitRequest):
                 "subject":    label,
                 "level":      LEVEL_MAP.get(val, val),
             })
-
     if assessments:
         sb.table("assessments").insert(assessments).execute()
 
     return {"success": True, "student_id": student_id}
 
+
 @app.get("/")
 def root():
-    return {"status": "ok"}
+    return {"status": "ok", "ALLOWED_ORIGINS": ALLOWED_ORIGINS}
