@@ -1,10 +1,11 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import create_client
 from dotenv import load_dotenv
 import os
 import re
+import uuid
 
 load_dotenv()
 
@@ -56,7 +57,28 @@ class SubmitRequest(BaseModel):
     channels: str = ""
     invest: str = ""
     budget: str = ""
+    screenshot_url: str = ""
     force: bool = False  # True = 覆盖更新已有数据
+
+
+@app.post("/api/upload-screenshot")
+async def upload_screenshot(file: UploadFile = File(...)):
+    if file.content_type not in ("image/jpeg", "image/png", "image/webp"):
+        raise HTTPException(status_code=400, detail="仅支持 JPG/PNG/WebP 格式")
+
+    contents = await file.read()
+    if len(contents) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="图片大小不能超过 5MB")
+
+    filename = f"{uuid.uuid4().hex}.jpg"
+    sb.storage.from_("screenshots").upload(
+        filename,
+        contents,
+        {"content-type": "image/jpeg"}
+    )
+
+    url = sb.storage.from_("screenshots").get_public_url(filename)
+    return {"url": url}
 
 
 @app.post("/api/submit")
@@ -111,6 +133,7 @@ async def submit(data: SubmitRequest):
             "subjects":       subjects_str,
             "wx_name":        wx_name,
             "phone":          phone,
+            "screenshot_url": data.screenshot_url or None,
             "push_count":     0,
             "last_push_date": None,
         }).eq("id", student_id).execute()
@@ -125,6 +148,7 @@ async def submit(data: SubmitRequest):
             "wx_name": wx_name,
             "phone":   phone,
             "subjects": subjects_str,
+            "screenshot_url": data.screenshot_url or None,
         }).execute()
         student_id = student_res.data[0]["id"]
 
