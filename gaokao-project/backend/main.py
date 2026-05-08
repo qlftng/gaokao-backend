@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from supabase import create_client
 from dotenv import load_dotenv
 import os
+import re
 
 load_dotenv()
 
@@ -67,6 +68,9 @@ async def submit(data: SubmitRequest):
         raise HTTPException(status_code=400, detail="省份不能为空")
     if not data.phone.strip():
         raise HTTPException(status_code=400, detail="手机号不能为空")
+    phone = data.phone.strip()
+    if not re.match(r"^1[3-9]\d{9}$", phone):
+        raise HTTPException(status_code=400, detail="请填写正确的11位手机号")
 
     # 六选三校验：物理/化学/生物/政治/历史/地理中恰好选 3 门
     elective_fields = [data.physics, data.chemistry, data.biology,
@@ -91,7 +95,7 @@ async def submit(data: SubmitRequest):
 
     # 检查是否已存在
     try:
-        existing = sb.table("students").select("id").eq("name", name).eq("wx_name", wx_name).execute()
+        existing = sb.table("students").select("id").eq("name", name).eq("phone", phone).execute()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"查重查询失败: {str(e)}")
 
@@ -105,6 +109,7 @@ async def submit(data: SubmitRequest):
         # force=True：覆盖更新 students 表
         sb.table("students").update({
             "subjects":       subjects_str,
+            "wx_name":        wx_name,
             "phone":          phone,
             "push_count":     0,
             "last_push_date": None,
