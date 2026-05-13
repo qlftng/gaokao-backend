@@ -168,6 +168,19 @@ async def submit(data: SubmitRequest):
     return {"success": True, "student_id": student_id}
 
 
+@app.delete("/api/delete-screenshot")
+async def delete_screenshot(url: str = ""):
+    """提交失败时清理已上传的截图，避免孤儿文件堆积"""
+    if not url:
+        return {"ok": False}
+    filename = url.rsplit("/", 1)[-1]
+    try:
+        sb.storage.from_("screenshots").remove([filename])
+    except Exception:
+        pass
+    return {"ok": True}
+
+
 @app.get("/")
 def root():
     return {"status": "ok", "ALLOWED_ORIGINS": ALLOWED_ORIGINS}
